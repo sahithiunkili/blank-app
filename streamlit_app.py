@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import xgboost as xgb
+import numpy as np
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
@@ -73,8 +74,12 @@ st.markdown("""
         color: white !important;
         border: none !important;
     }
-    div[data-testid="stButton"] button[kind="primary"]:hover { background-color: #000000 !important; }
-    
+    div[data-testid="stButton"] button[kind="secondary"] {
+        background-color: transparent !important;
+        color: #1a1a1a !important;
+        border: 1px solid #1a1a1a !important;
+    }
+
     div[data-testid="stVerticalBlock"] > div[style*="border"] {
         background-color: #ffffff !important;
         border-radius: 16px !important;
@@ -83,28 +88,41 @@ st.markdown("""
         padding: 10px;
     }
     
-    /* Subtle Data Callout Footer */
-    .data-footer {
-        text-align: center;
-        color: #9ca3af;
-        font-size: 12px;
-        margin-top: 50px;
+    /* Streamlit Tabs Styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 20px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: transparent;
+        border-radius: 0px 0px 0px 0px;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
         font-family: 'Inter', sans-serif;
+        font-weight: 600;
+        color: #6b7280;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #1a1a1a !important;
+        border-bottom: 2px solid #1a1a1a !important;
     }
     
+    .data-footer { text-align: center; color: #9ca3af; font-size: 12px; margin-top: 50px; }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
-# Initialize Session State
+# Session State
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 if 'persona' not in st.session_state:
     st.session_state['persona'] = None
 
 # -----------------------------------------
-# 2. BULLETPROOF CACHED ML ARCHITECTURE
+# 2. CACHED ML ARCHITECTURE & BATCH INFERENCE
 # -----------------------------------------
 @st.cache_resource
 def initialize_ai_engine():
@@ -129,39 +147,48 @@ def initialize_ai_engine():
     ratio = y.value_counts()[0] / y.value_counts()[1]
     xgb_model = xgb.XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=5, scale_pos_weight=ratio, random_state=42).fit(X_processed, y)
     
+    # --- BATCH INFERENCE FOR AUDIENCE BUILDER ---
+    # We pre-calculate AI outputs for the CRM mock database to enable fast filtering
+    crm_ml_data = df_ml[df_ml['Client_ID'].isin(df_crm['Client_ID'])].drop(columns=['y', 'duration', 'Client_ID'])
+    crm_processed = preprocessor.transform(crm_ml_data)
+    
+    df_crm['AI_Cluster'] = kmeans.predict(crm_processed)
+    df_crm['Propensity'] = xgb_model.predict_proba(crm_processed)[:, 1]
+    
+    # Map cluster IDs to human-readable segments for the UI
+    segment_map = {
+        0: "🟡 Low-Rate Professional", 1: "🟡 High-Rate Professional",
+        2: "🟠 Traditional Saver", 3: "🟢 Proven Converter", 4: "🔴 High-Friction / Past Reject"
+    }
+    df_crm['AI_Segment'] = df_crm['AI_Cluster'].map(segment_map)
+    
     return df_ml, df_crm, preprocessor, kmeans, xgb_model
 
 # -----------------------------------------
-# 3. BUSINESS LOGIC (Adjusted Thresholds)
+# 3. BUSINESS LOGIC (Individual Insights)
 # -----------------------------------------
 def get_insights(cluster_id, propensity):
-    segments = {
-        0: "🟡 Low-Rate Environment Professional",
-        1: "🟡 High-Rate Environment Professional",
-        2: "🟠 Traditional Retail Saver",
-        3: "🟢 Proven Converter",
-        4: "🔴 High-Friction / Past Reject"
+    segment_map = {
+        0: "🟡 Low-Rate Environment Professional", 1: "🟡 High-Rate Environment Professional",
+        2: "🟠 Traditional Retail Saver", 3: "🟢 Proven Converter", 4: "🔴 High-Friction / Past Reject"
     }
-    segment = segments.get(cluster_id, "Unknown Segment")
+    segment = segment_map.get(cluster_id, "Unknown Segment")
     
-    # We lowered the thresholds to 0.50 and 0.15 to account for the model's 
-    # conservative nature on imbalanced financial datasets.
-    if propensity >= 0.50: 
-        return segment, "High likelihood of immediate conversion.", "TFSA Top-Up Nudge (Email + In-App)", False, "green", "31%", "$2,100"
+    if propensity >= 0.50:
+        return segment, "High likelihood of conversion.", "TFSA Top-Up Nudge (Email + In-App)", False, "green", "31%", "$2,100"
     elif 0.15 <= propensity < 0.50:
-        return segment, "On the fence; requires nurturing.", "Tax-Loss Harvesting Education Series", False, "orange", "14%", "$850"
+        return segment, "On the fence; requires nurturing.", "Tax-Loss Harvesting Education", False, "orange", "14%", "$850"
     else:
         if cluster_id == 4:
-            return segment, "High risk of fatigue or churn if pushed.", "DO NOT CONTACT. Flag for RM review.", True, "red", "< 2%", "$0"
-        return segment, "High risk of fatigue or churn if pushed.", "Maintain dormant state. No action recommended.", False, "red", "< 2%", "$0"
+            return segment, "High risk of fatigue or churn.", "DO NOT CONTACT. Flag for RM.", True, "red", "< 2%", "$0"
+        return segment, "High risk of fatigue or churn.", "Maintain dormant state.", False, "red", "< 2%", "$0"
+
 # -----------------------------------------
 # 4. LOGIN SCREEN
 # -----------------------------------------
 if not st.session_state['logged_in']:
     st.markdown('<div class="ws-top-nav"><div class="ws-logo">Wealthsimple</div><div class="ws-nav-links">Admin Portal</div></div>', unsafe_allow_html=True)
-    
-    st.markdown("<h2 style='text-align: center;'>Secure System Login</h2>", unsafe_allow_html=True)
-    st.write("")
+    st.markdown("<h2 style='text-align: center;'>Secure System Login</h2><br>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1.5, 1, 1.5])
     with col2:
         with st.container(border=True):
@@ -182,16 +209,13 @@ else:
         <div class="ws-top-nav">
             <div class="ws-logo">Wealthsimple</div>
             <div class="ws-nav-links">
-                <span>Personal</span>
-                <span>Business</span>
-                <span>Support</span>
-                <span class="ws-nav-btn">Log out</span>
-                <span class="ws-nav-btn dark">Get started</span>
+                <span>Personal</span><span>Business</span><span>Support</span>
+                <span class="ws-nav-btn">Log out</span><span class="ws-nav-btn dark">Get started</span>
             </div>
         </div>
     """, unsafe_allow_html=True)
 
-    with st.spinner("Initializing AI Engines..."):
+    with st.spinner("Initializing AI Engines & Batch Processing CRM..."):
         try:
             df_ml, df_crm, preprocessor, kmeans, xgb_model = initialize_ai_engine()
         except Exception as e:
@@ -207,24 +231,62 @@ else:
     st.markdown("<h2>AI Client Segmentation Engine</h2>", unsafe_allow_html=True)
     st.markdown("<p style='font-size: 1.1rem; color: #4b5563; margin-bottom: 30px;'>Dynamically segmenting users and predicting response likelihood at scale.</p>", unsafe_allow_html=True)
 
-    col_list, col_space, col_profile = st.columns([1.2, 0.1, 1.5])
+    # Split Layout
+    col_left, col_space, col_profile = st.columns([1.2, 0.1, 1.5])
 
-    with col_list:
-        st.markdown("<h3 class='ws-serif' style='font-size: 1.5rem;'>Customer Directory</h3>", unsafe_allow_html=True)
+    # ==========================================
+    # LEFT PANE: TABS FOR DIRECTORY & BUILDER
+    # ==========================================
+    with col_left:
+        tab_dir, tab_build = st.tabs(["Directory", "Audience Builder"])
         
-        # MUST-ADD 3: Batch Processing Teaser
-        st.button("⚡ Process 1,247 similar clients (Batch Mode)", type="secondary", use_container_width=True)
-        st.write("") # Spacer
-        
-        display_df = df_crm[['Client_ID', 'Name', 'Profession']].copy()
-        selected_name = st.selectbox("Search Client Profiles:", df_crm['Name'].tolist())
-        selected_client_id = df_crm[df_crm['Name'] == selected_name]['Client_ID'].values[0]
-        
-        st.dataframe(display_df, use_container_width=True, hide_index=True, height=450)
+        with tab_dir:
+            st.markdown("<h3 class='ws-serif' style='font-size: 1.3rem; margin-top: 10px;'>Customer Directory</h3>", unsafe_allow_html=True)
+            display_df = df_crm[['Client_ID', 'Name', 'Profession']].copy()
+            selected_name = st.selectbox("Search Client Profiles (Updates Profile Panel):", df_crm['Name'].tolist())
+            st.dataframe(display_df, use_container_width=True, hide_index=True, height=450)
 
+        with tab_build:
+            st.markdown("<h3 class='ws-serif' style='font-size: 1.3rem; margin-top: 10px;'>Build Target Group</h3>", unsafe_allow_html=True)
+            st.caption("Combine AI-driven rules with manual overrides.")
+            
+            # --- Rule-Based Add ---
+            st.markdown("**1. Rule-Based Segmenting**")
+            target_segments = st.multiselect("Select AI Behavioral Segments", df_crm['AI_Segment'].unique(), default=["🟢 Proven Converter"])
+            min_propensity = st.slider("Minimum Propensity Score (%)", 0, 100, 45)
+            
+            # Filter Dataframe based on rules
+            rule_based_df = df_crm[
+                (df_crm['AI_Segment'].isin(target_segments)) & 
+                (df_crm['Propensity'] >= (min_propensity / 100))
+            ]
+            
+            # --- Manual Add / Exclude ---
+            st.markdown("**2. Manual Overrides**")
+            manual_add_names = st.multiselect("Manually Add Clients (Regardless of rules):", df_crm['Name'].tolist())
+            
+            # Combine Rule-Based + Manual
+            manual_add_df = df_crm[df_crm['Name'].isin(manual_add_names)]
+            final_audience_df = pd.concat([rule_based_df, manual_add_df]).drop_duplicates(subset=['Client_ID'])
+            
+            st.divider()
+            
+            # --- Impact & Action ---
+            st.markdown(f"### 🎯 Total Audience: {len(final_audience_df)} Clients")
+            st.dataframe(final_audience_df[['Name', 'AI_Segment', 'Propensity']], use_container_width=True, hide_index=True, height=200)
+            
+            if st.session_state['persona'] == "Marketing Operator":
+                st.button("Launch Email Campaign", type="primary", use_container_width=True)
+            else:
+                st.button("Assign to Advisors (Batch)", type="primary", use_container_width=True)
+
+    # ==========================================
+    # RIGHT PANE: INDIVIDUAL CUSTOMER PROFILE
+    # ==========================================
     with col_profile:
         st.markdown("<h3 class='ws-serif' style='font-size: 1.5rem;'>Client Profile</h3>", unsafe_allow_html=True)
         
+        selected_client_id = df_crm[df_crm['Name'] == selected_name]['Client_ID'].values[0]
         crm_data = df_crm[df_crm['Client_ID'] == selected_client_id].iloc[0]
         ml_data = df_ml[df_ml['Client_ID'] == selected_client_id].drop(columns=['y', 'duration', 'Client_ID'])
         
@@ -246,13 +308,11 @@ else:
             
             st.markdown("<h3 style='font-size: 1.2rem; margin-bottom: 15px;'>🧠 AI Insights</h3>", unsafe_allow_html=True)
             
-            # MUST-ADD 1: Confidence Visualization
             st.markdown(f"**Current Segment:** {segment}")
             st.caption("Model Classification Confidence:")
-            st.progress(float(min(propensity + 0.15, 0.98))) # Simulated cluster confidence bar for UI
+            st.progress(float(min(propensity + 0.15, 0.98))) 
             st.write("")
             
-            # MUST-ADD 2: Action Impact Preview
             st.markdown(f"**✅ Recommended Action:** {action}")
             metric_col1, metric_col2, metric_col3 = st.columns(3)
             metric_col1.metric("Conversion Propensity", f"{propensity * 100:.1f}%")
@@ -260,7 +320,6 @@ else:
             metric_col3.metric("Projected AUM Uplift", exp_uplift)
             st.markdown("<br>", unsafe_allow_html=True)
                 
-            # REFINEMENT 1: Explicit Human Decision Boundary
             if human_veto:
                 st.error("⚠️ **Compliance-Sensitive (Risk Profile Change)**\n\nRequires Human Approval Before Execution")
                 if st.session_state['persona'] == "Marketing Operator":
@@ -274,5 +333,4 @@ else:
                 st.success("✅ **Cleared for Automated Campaign**")
                 st.button("Execute Action", type="primary", use_container_width=True)
 
-    # REFINEMENT 2: Data Source Callout
     st.markdown('<div class="data-footer">Powered by ML models trained on 41k+ anonymized banking records</div>', unsafe_allow_html=True)
