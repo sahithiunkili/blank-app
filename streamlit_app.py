@@ -1,217 +1,139 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import xgboost as xgb
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.cluster import KMeans
+import joblib
 
 # -----------------------------------------
-# 1. PAGE CONFIGURATION & STATE MANAGEMENT
+# 1. PAGE CONFIGURATION & CUSTOM CSS
 # -----------------------------------------
-st.set_page_config(page_title="Wealth AI - Client Insights", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Wealth AI - CRM Portal", layout="wide", initial_sidebar_state="collapsed")
 
-if 'logged_in' not in st.session_state:
-    st.session_state['logged_in'] = False
-if 'persona' not in st.session_state:
-    st.session_state['persona'] = None
+# Injecting CSS to mimic the clean, white-card CRM look from your mockup
+st.markdown("""
+    <style>
+    .stApp { background-color: #f4f6f9; }
+    .css-1d391kg { padding-top: 1rem; }
+    .crm-header { background-color: #1e3a5f; color: white; padding: 15px; border-radius: 5px; text-align: center; margin-bottom: 20px;}
+    .profile-card { background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    </style>
+""", unsafe_allow_html=True)
 
 # -----------------------------------------
-# 2. CACHED MACHINE LEARNING PIPELINE
+# 2. CACHED ARCHITECTURE LOADING
 # -----------------------------------------
 @st.cache_resource
-def load_and_train_models():
-    """Loads data, builds the preprocessing pipeline, and trains Engines A & B."""
-    # 1. Load Data
-    df = pd.read_csv('bank-additional-full.csv', sep=';')
+def load_models():
+    """Loads the pre-trained architecture from disk."""
+    try:
+        preprocessor = joblib.load('preprocessor.joblib')
+        kmeans = joblib.load('engine_a_kmeans.joblib')
+        xgb_model = joblib.load('engine_b_xgboost.joblib')
+        return preprocessor, kmeans, xgb_model, True
+    except Exception as e:
+        return None, None, None, str(e)
+
+@st.cache_data
+def load_data():
+    """Loads and aligns the ML dataset with the CRM mock data."""
+    # 1. Load ML Data
+    df_ml = pd.read_csv('bank-additional-full.csv', sep=';')
+    df_ml['Client_ID'] = [f"CLI-{10000 + i}" for i in range(len(df_ml))]
     
-    # Simulate Client IDs for the UI
-    df['client_id'] = [f"CLI-{10000 + i}" for i in range(len(df))]
-    
-    # 2. Preprocessing Setup (Dropping duration to prevent leakage)
-    X = df.drop(columns=['y', 'duration', 'client_id'])
-    y = df['y'].map({'yes': 1, 'no': 0})
-    
-    numeric_features = ['age', 'campaign', 'pdays', 'previous', 'emp.var.rate', 
-                        'cons.price.idx', 'cons.conf.idx', 'euribor3m', 'nr.employed']
-    categorical_features = ['job', 'marital', 'education', 'default', 'housing', 
-                            'loan', 'contact', 'month', 'day_of_week', 'poutcome']
-    
-    numeric_transformer = Pipeline(steps=[
-        ('imputer', SimpleImputer(strategy='median')),
-        ('scaler', StandardScaler())
-    ])
-    categorical_transformer = Pipeline(steps=[
-        ('imputer', SimpleImputer(strategy='constant', fill_value='unknown')),
-        ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
-    ])
-    
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ('num', numeric_transformer, numeric_features),
-            ('cat', categorical_transformer, categorical_features)
-        ])
-    
-    X_processed = preprocessor.fit_transform(X)
-    
-    # 3. Train Engine A (K-Means)
-    kmeans = KMeans(n_clusters=5, random_state=42, n_init='auto')
-    kmeans.fit(X_processed)
-    
-    # 4. Train Engine B (XGBoost)
-    majority_class_count = y.value_counts()[0]
-    minority_class_count = y.value_counts()[1]
-    imbalance_ratio = majority_class_count / minority_class_count
-    
-    xgb_model = xgb.XGBClassifier(
-        n_estimators=100, learning_rate=0.1, max_depth=5, 
-        scale_pos_weight=imbalance_ratio, random_state=42, eval_metric='logloss'
-    )
-    xgb_model.fit(X_processed, y)
-    
-    return df, preprocessor, kmeans, xgb_model, numeric_features, categorical_features
+    # 2. Load CRM Presentation Data
+    df_crm = pd.read_csv('wealthsimple_crm_mock.csv')
+    return df_ml, df_crm
+
+# Initialize connection
+preprocessor, kmeans, xgb_model, models_loaded = load_models()
+df_ml, df_crm = load_data()
+
+if getattr(models_loaded, 'startswith', lambda x: False)('Error'):
+    st.error(f"Failed to load models. Ensure .joblib files are in the repository. Error: {models_loaded}")
+    st.stop()
 
 # -----------------------------------------
 # 3. BUSINESS LOGIC
 # -----------------------------------------
-def generate_client_insights(cluster_id, propensity_score):
-    segment_map = {
+def get_insights(cluster_id, propensity):
+    segments = {
         0: "🟡 Low-Rate Environment Professional",
         1: "🟡 High-Rate Environment Professional",
         2: "🟠 Traditional Retail Saver",
-        3: "🟢 Highly Engaged / Proven Converter",
+        3: "🟢 Proven Converter",
         4: "🔴 High-Friction / Past Reject"
     }
+    segment = segments.get(cluster_id, "Unknown Segment")
     
-    current_segment = segment_map.get(cluster_id, "Unknown Segment")
-    
-    if propensity_score >= 0.75:
-        trajectory = "High likelihood of immediate conversion."
-        action = "Send aggressive TFSA Top-Up push notification."
-        requires_human = False
-        color = "green"
-    elif 0.40 <= propensity_score < 0.75:
-        trajectory = "On the fence; requires nurturing."
-        action = "Send educational email series on tax-loss harvesting."
-        requires_human = False
-        color = "orange"
+    if propensity >= 0.75:
+        return segment, "High likelihood of immediate conversion.", "Send aggressive TFSA Top-Up push notification.", False, "green"
+    elif 0.40 <= propensity < 0.75:
+        return segment, "On the fence; requires nurturing.", "Send educational email series on tax-loss harvesting.", False, "orange"
     else:
-        trajectory = "High risk of fatigue or churn if pushed."
-        color = "red"
-        if cluster_id == 4: 
-            action = "DO NOT CONTACT. Flag for relationship manager review."
-            requires_human = True
-        else:
-            action = "Maintain dormant state. No action recommended."
-            requires_human = False
-            
-    return current_segment, trajectory, action, requires_human, color
+        if cluster_id == 4:
+            return segment, "High risk of fatigue or churn if pushed.", "DO NOT CONTACT. Flag for RM review.", True, "red"
+        return segment, "High risk of fatigue or churn if pushed.", "Maintain dormant state. No action recommended.", False, "red"
 
 # -----------------------------------------
-# 4. LOGIN SCREEN UI
+# 4. CRM PORTAL UI
 # -----------------------------------------
-if not st.session_state['logged_in']:
-    st.markdown("<h1 style='text-align: center;'>Wealth AI Portal</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center;'>AI-Native Client Segmentation Engine</p>", unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col2:
-        with st.form("login_form"):
-            st.text_input("Username", value="admin")
-            st.text_input("Password", type="password", value="password")
-            persona_choice = st.selectbox("Select Persona", 
-                                          ["Marketing Operator", "Relationship Manager", "Compliance Officer"])
-            submit = st.form_submit_button("Secure Login")
-            
-            if submit:
-                st.session_state['logged_in'] = True
-                st.session_state['persona'] = persona_choice
-                st.rerun()
+# Header mapping to the mockup
+st.markdown('<div class="crm-header"><h2>💼 Wealth AI CRM Portal - Welcome, Admin</h2></div>', unsafe_allow_html=True)
 
-# -----------------------------------------
-# 5. MAIN DASHBOARD UI
-# -----------------------------------------
-else:
-    # Load Models & Data
-    with st.spinner("Initializing AI Models..."):
-        df, preprocessor, kmeans, xgb_model, num_cols, cat_cols = load_and_train_models()
-    
-    # Sidebar
-    st.sidebar.title("Wealth AI Dashboard")
-    st.sidebar.info(f"**Logged in as:**\n{st.session_state['persona']}")
-    
-    # Client Selector (Simulating scrolling a CRM)
-    # Let's pick a mix of known yes/no clients for a good demo
-    demo_clients = df.iloc[[0, 100, 35000, 40000, 41180]]['client_id'].tolist()
-    selected_client_id = st.sidebar.selectbox("Search Client ID", demo_clients)
-    
-    if st.sidebar.button("Logout"):
-        st.session_state['logged_in'] = False
-        st.session_state['persona'] = None
-        st.rerun()
+# Layout Split (Left: CRM List, Right: Profile Card)
+col_list, col_space, col_profile = st.columns([1.5, 0.1, 1.2])
 
-    # Main Area
-    st.title("Client Overview")
+with col_list:
+    st.markdown("### Customer List")
     
-    # Get Client Data
-    client_data = df[df['client_id'] == selected_client_id].iloc[0]
+    # Create a nice display dataframe for the left side
+    display_df = df_crm[['Client_ID', 'Name', 'Profession', 'Estimated_Income_CAD', 'Account_History']].copy()
+    display_df.columns = ['ID', 'Client Name', 'Occupation', 'Est. Income', 'Current Accounts']
     
-    # Display Basic CRM Info
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Age", client_data['age'])
-    col2.metric("Profession", str(client_data['job']).title())
-    col3.metric("Education", str(client_data['education']).replace('.', ' ').title())
-    col4.metric("Last Interaction", f"{client_data['pdays']} days ago" if client_data['pdays'] != 999 else "Never")
+    # We use a selectbox right above the table to ensure rock-solid interactivity during the demo
+    selected_name = st.selectbox("Search Client Profiles:", df_crm['Name'].tolist())
+    selected_client_id = df_crm[df_crm['Name'] == selected_name]['Client_ID'].values[0]
     
-    st.divider()
+    st.dataframe(display_df, use_container_width=True, hide_index=True, height=500)
 
-    # AI Engine Execution
-    st.subheader("🧠 AI Insights Engine")
+with col_profile:
+    st.markdown("### Customer Profile")
     
-    # Format client data for the model
-    X_single = df[df['client_id'] == selected_client_id].drop(columns=['y', 'duration', 'client_id'])
-    X_single_processed = preprocessor.transform(X_single)
+    # Fetch unified client data
+    crm_data = df_crm[df_crm['Client_ID'] == selected_client_id].iloc[0]
+    ml_data = df_ml[df_ml['Client_ID'] == selected_client_id].drop(columns=['y', 'duration', 'Client_ID'])
     
-    # Get Predictions
-    cluster_id = kmeans.predict(X_single_processed)[0]
-    propensity = xgb_model.predict_proba(X_single_processed)[0][1]
+    # Run Inference!
+    ml_processed = preprocessor.transform(ml_data)
+    cluster_id = kmeans.predict(ml_processed)[0]
+    propensity = xgb_model.predict_proba(ml_processed)[0][1]
     
-    # Get Business Logic
-    segment, trajectory, action, human_veto, color = generate_client_insights(cluster_id, propensity)
+    segment, trajectory, action, human_veto, color = get_insights(cluster_id, propensity)
     
-    # Display AI Outputs
-    ui_col1, ui_col2 = st.columns(2)
-    
-    with ui_col1:
-        st.markdown("### Engine A: Current State")
-        st.info(f"**{segment}**")
+    # --- Profile Card UI (Matching the mockup) ---
+    with st.container(border=True):
+        st.markdown(f"## 👤 {crm_data['Name']}")
         
-        st.markdown("### Engine B: Future Trajectory")
+        c1, c2 = st.columns(2)
+        c1.markdown(f"**Age:** {crm_data['Age']}<br>**Occupation:** {crm_data['Profession']}<br>**Income:** ${crm_data['Estimated_Income_CAD']:,}", unsafe_allow_html=True)
+        c2.markdown(f"**Accounts:** {crm_data['Account_History']}<br>**Newcomer:** {crm_data['Is_Newcomer']}", unsafe_allow_html=True)
+        
+        st.divider()
+        
+        # --- AI Insights Block ---
+        st.markdown("#### 🧠 AI Engine Insights")
+        st.info(f"**Current Segment:** {segment}")
+        
         if color == "green":
-            st.success(f"Propensity Score: **{propensity * 100:.1f}%**\n\n{trajectory}")
+            st.success(f"**Propensity Score:** {propensity * 100:.1f}%\n\n**Action:** {action}")
         elif color == "orange":
-            st.warning(f"Propensity Score: **{propensity * 100:.1f}%**\n\n{trajectory}")
+            st.warning(f"**Propensity Score:** {propensity * 100:.1f}%\n\n**Action:** {action}")
         else:
-            st.error(f"Propensity Score: **{propensity * 100:.1f}%**\n\n{trajectory}")
+            st.error(f"**Propensity Score:** {propensity * 100:.1f}%\n\n**Action:** {action}")
             
-    with ui_col2:
-        st.markdown("### ⚡ Next Best Action")
-        st.write(action)
-        
-        # Displaying the Human Veto Logic dynamically based on the Persona logged in
         if human_veto:
             st.error("🚨 **COMPLIANCE HOLD: Human Veto Required**")
-            
-            if st.session_state['persona'] == "Marketing Operator":
-                st.write("You do not have permission to execute this campaign. Please route to a Relationship Manager.")
-                st.button("Route for Approval", disabled=False)
-            else:
-                st.write("Review client history before approving automated contact.")
-                col_a, col_b = st.columns(2)
-                col_a.button("Approve Exception", type="primary")
-                col_b.button("Dismiss Nudge")
+            ca, cb = st.columns(2)
+            ca.button("Approve Exception", type="primary", use_container_width=True)
+            cb.button("Dismiss Nudge", use_container_width=True)
         else:
             st.success("✅ **Cleared for Automated Campaign**")
-            st.button("Execute Action", type="primary")
+            st.button("Execute Action", type="primary", use_container_width=True)
