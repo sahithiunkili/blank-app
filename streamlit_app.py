@@ -132,7 +132,7 @@ def initialize_ai_engine():
     return df_ml, df_crm, preprocessor, kmeans, xgb_model
 
 # -----------------------------------------
-# 3. BUSINESS LOGIC (Now with Impact Metrics)
+# 3. BUSINESS LOGIC (Adjusted Thresholds)
 # -----------------------------------------
 def get_insights(cluster_id, propensity):
     segments = {
@@ -144,16 +144,16 @@ def get_insights(cluster_id, propensity):
     }
     segment = segments.get(cluster_id, "Unknown Segment")
     
-    # Adding Action Impact Preview Metrics
-    if propensity >= 0.75:
+    # We lowered the thresholds to 0.50 and 0.15 to account for the model's 
+    # conservative nature on imbalanced financial datasets.
+    if propensity >= 0.50: 
         return segment, "High likelihood of immediate conversion.", "TFSA Top-Up Nudge (Email + In-App)", False, "green", "31%", "$2,100"
-    elif 0.40 <= propensity < 0.75:
+    elif 0.15 <= propensity < 0.50:
         return segment, "On the fence; requires nurturing.", "Tax-Loss Harvesting Education Series", False, "orange", "14%", "$850"
     else:
         if cluster_id == 4:
             return segment, "High risk of fatigue or churn if pushed.", "DO NOT CONTACT. Flag for RM review.", True, "red", "< 2%", "$0"
         return segment, "High risk of fatigue or churn if pushed.", "Maintain dormant state. No action recommended.", False, "red", "< 2%", "$0"
-
 # -----------------------------------------
 # 4. LOGIN SCREEN
 # -----------------------------------------
