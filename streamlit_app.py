@@ -1,6 +1,11 @@
 import streamlit as st
 import pandas as pd
-import joblib
+import xgboost as xgb
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.cluster import KMeans
 
 # -----------------------------------------
 # 1. PAGE CONFIGURATION & CUSTOM CSS
@@ -51,26 +56,36 @@ if 'persona' not in st.session_state:
     st.session_state['persona'] = None
 
 # -----------------------------------------
-# 2. LOAD DECOUPLED ML ARCHITECTURE
+# 2. BULLETPROOF CACHED ML ARCHITECTURE
 # -----------------------------------------
 @st.cache_resource
-def load_architecture():
-    """Loads the pre-trained .joblib models from the repository."""
-    try:
-        preprocessor = joblib.load('preprocessor.joblib')
-        kmeans = joblib.load('engine_a_kmeans.joblib')
-        xgb_model = joblib.load('engine_b_xgboost.joblib')
-        return preprocessor, kmeans, xgb_model, "Success"
-    except Exception as e:
-        return None, None, None, str(e)
-
-@st.cache_data
-def load_data():
-    """Loads and aligns the datasets."""
+def initialize_ai_engine():
+    """Loads data and trains models in-memory to prevent version mismatches on the cloud."""
+    # 1. Load Datasets
     df_ml = pd.read_csv('bank-additional-full.csv', sep=';')
     df_ml['Client_ID'] = [f"CLI-{10000 + i}" for i in range(len(df_ml))]
     df_crm = pd.read_csv('wealthsimple_crm_mock.csv')
-    return df_ml, df_crm
+    
+    # 2. Build Preprocessor
+    X = df_ml.drop(columns=['y', 'duration', 'Client_ID'])
+    y = df_ml['y'].map({'yes': 1, 'no': 0})
+    
+    num_cols = ['age', 'campaign', 'pdays', 'previous', 'emp.var.rate', 'cons.price.idx', 'cons.conf.idx', 'euribor3m', 'nr.employed']
+    cat_cols = ['job', 'marital', 'education', 'default', 'housing', 'loan', 'contact', 'month', 'day_of_week', 'poutcome']
+    
+    preprocessor = ColumnTransformer(transformers=[
+        ('num', Pipeline([('imputer', SimpleImputer(strategy='median')), ('scaler', StandardScaler())]), num_cols),
+        ('cat', Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='unknown')), ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))]), cat_cols)
+    ])
+    
+    X_processed = preprocessor.fit_transform(X)
+    
+    # 3. Train Engines
+    kmeans = KMeans(n_clusters=5, random_state=42, n_init='auto').fit(X_processed)
+    ratio = y.value_counts()[0] / y.value_counts()[1]
+    xgb_model = xgb.XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=5, scale_pos_weight=ratio, random_state=42).fit(X_processed, y)
+    
+    return df_ml, df_crm, preprocessor, kmeans, xgb_model
 
 # -----------------------------------------
 # 3. BUSINESS LOGIC
@@ -127,14 +142,13 @@ else:
         </div>
     """, unsafe_allow_html=True)
 
-    # 2. Load Backend
-    preprocessor, kmeans, xgb_model, load_status = load_architecture()
-    if load_status != "Success":
-        st.error(f"🚨 Model Load Error: {load_status}")
-        st.warning("If this mentions '_fill_dtype' or 'SimpleImputer', it means your scikit-learn versions don't match. You will need to switch back to the in-memory training pipeline.")
-        st.stop()
-        
-    df_ml, df_crm = load_data()
+    # 2. Load Backend (Trains in-memory in ~2 seconds to avoid version errors)
+    with st.spinner("Initializing AI Engines..."):
+        try:
+            df_ml, df_crm, preprocessor, kmeans, xgb_model = initialize_ai_engine()
+        except Exception as e:
+            st.error(f"Initialization Error: {e}")
+            st.stop()
 
     # Sidebar controls
     st.sidebar.title("Controls")
