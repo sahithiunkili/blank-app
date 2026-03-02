@@ -186,7 +186,6 @@ def get_insights(cluster_id, propensity):
     elif 0.15 <= propensity < 0.50:
         return segment, "On the fence; requires nurturing.", "Tax-Loss Harvesting Education", False, "orange", "14%", "$850"
     else:
-        # FOOLPROOF VIDEO FIX: Anyone under 15% propensity triggers the Human Veto
         return segment, "High compliance risk. Do not auto-enroll.", "DO NOT CONTACT. Flag for RM.", True, "red", "< 2%", "$0"
 
 # -----------------------------------------
