@@ -60,7 +60,7 @@ def load_architecture():
         preprocessor = joblib.load('preprocessor.joblib')
         kmeans = joblib.load('engine_a_kmeans.joblib')
         xgb_model = joblib.load('engine_b_xgboost.joblib')
-        return preprocessor, kmeans, xgb_model, True
+        return preprocessor, kmeans, xgb_model, "Success"
     except Exception as e:
         return None, None, None, str(e)
 
@@ -128,9 +128,10 @@ else:
     """, unsafe_allow_html=True)
 
     # 2. Load Backend
-    preprocessor, kmeans, xgb_model, models_loaded = load_architecture()
-    if getattr(models_loaded, 'startswith', lambda x: False)('Error'):
-        st.error(f"Model Load Error. Ensure Scikit-Learn versions match. Details: {models_loaded}")
+    preprocessor, kmeans, xgb_model, load_status = load_architecture()
+    if load_status != "Success":
+        st.error(f"🚨 Model Load Error: {load_status}")
+        st.warning("If this mentions '_fill_dtype' or 'SimpleImputer', it means your scikit-learn versions don't match. You will need to switch back to the in-memory training pipeline.")
         st.stop()
         
     df_ml, df_crm = load_data()
