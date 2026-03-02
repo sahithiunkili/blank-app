@@ -1,13 +1,17 @@
 import streamlit as st
 import pandas as pd
-import joblib
+import xgboost as xgb
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.cluster import KMeans
 
 # -----------------------------------------
 # 1. PAGE CONFIGURATION & CUSTOM CSS
 # -----------------------------------------
 st.set_page_config(page_title="Wealth AI - CRM Portal", layout="wide", initial_sidebar_state="collapsed")
 
-# Injecting CSS to mimic the clean, white-card CRM look from your mockup
 st.markdown("""
     <style>
     .stApp { background-color: #f4f6f9; }
@@ -18,36 +22,42 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------
-# 2. CACHED ARCHITECTURE LOADING
+# 2. BULLETPROOF CACHED ML ARCHITECTURE
 # -----------------------------------------
 @st.cache_resource
-def load_models():
-    """Loads the pre-trained architecture from disk."""
-    try:
-        preprocessor = joblib.load('preprocessor.joblib')
-        kmeans = joblib.load('engine_a_kmeans.joblib')
-        xgb_model = joblib.load('engine_b_xgboost.joblib')
-        return preprocessor, kmeans, xgb_model, True
-    except Exception as e:
-        return None, None, None, str(e)
-
-@st.cache_data
-def load_data():
-    """Loads and aligns the ML dataset with the CRM mock data."""
-    # 1. Load ML Data
+def initialize_ai_engine():
+    """Loads data and trains models in-memory to prevent version mismatches on the cloud."""
+    # 1. Load Datasets
     df_ml = pd.read_csv('bank-additional-full.csv', sep=';')
     df_ml['Client_ID'] = [f"CLI-{10000 + i}" for i in range(len(df_ml))]
-    
-    # 2. Load CRM Presentation Data
     df_crm = pd.read_csv('wealthsimple_crm_mock.csv')
-    return df_ml, df_crm
+    
+    # 2. Build Preprocessor
+    X = df_ml.drop(columns=['y', 'duration', 'Client_ID'])
+    y = df_ml['y'].map({'yes': 1, 'no': 0})
+    
+    num_cols = ['age', 'campaign', 'pdays', 'previous', 'emp.var.rate', 'cons.price.idx', 'cons.conf.idx', 'euribor3m', 'nr.employed']
+    cat_cols = ['job', 'marital', 'education', 'default', 'housing', 'loan', 'contact', 'month', 'day_of_week', 'poutcome']
+    
+    preprocessor = ColumnTransformer(transformers=[
+        ('num', Pipeline([('imputer', SimpleImputer(strategy='median')), ('scaler', StandardScaler())]), num_cols),
+        ('cat', Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='unknown')), ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))]), cat_cols)
+    ])
+    
+    X_processed = preprocessor.fit_transform(X)
+    
+    # 3. Train Engines
+    kmeans = KMeans(n_clusters=5, random_state=42, n_init='auto').fit(X_processed)
+    ratio = y.value_counts()[0] / y.value_counts()[1]
+    xgb_model = xgb.XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=5, scale_pos_weight=ratio, random_state=42).fit(X_processed, y)
+    
+    return df_ml, df_crm, preprocessor, kmeans, xgb_model
 
-# Initialize connection
-preprocessor, kmeans, xgb_model, models_loaded = load_models()
-df_ml, df_crm = load_data()
-
-if getattr(models_loaded, 'startswith', lambda x: False)('Error'):
-    st.error(f"Failed to load models. Ensure .joblib files are in the repository. Error: {models_loaded}")
+# Run initialization
+try:
+    df_ml, df_crm, preprocessor, kmeans, xgb_model = initialize_ai_engine()
+except Exception as e:
+    st.error(f"Failed to initialize AI Engine. Ensure both CSV files are uploaded. Error: {e}")
     st.stop()
 
 # -----------------------------------------
@@ -75,20 +85,16 @@ def get_insights(cluster_id, propensity):
 # -----------------------------------------
 # 4. CRM PORTAL UI
 # -----------------------------------------
-# Header mapping to the mockup
 st.markdown('<div class="crm-header"><h2>💼 Wealth AI CRM Portal - Welcome, Admin</h2></div>', unsafe_allow_html=True)
 
-# Layout Split (Left: CRM List, Right: Profile Card)
 col_list, col_space, col_profile = st.columns([1.5, 0.1, 1.2])
 
 with col_list:
     st.markdown("### Customer List")
     
-    # Create a nice display dataframe for the left side
     display_df = df_crm[['Client_ID', 'Name', 'Profession', 'Estimated_Income_CAD', 'Account_History']].copy()
     display_df.columns = ['ID', 'Client Name', 'Occupation', 'Est. Income', 'Current Accounts']
     
-    # We use a selectbox right above the table to ensure rock-solid interactivity during the demo
     selected_name = st.selectbox("Search Client Profiles:", df_crm['Name'].tolist())
     selected_client_id = df_crm[df_crm['Name'] == selected_name]['Client_ID'].values[0]
     
@@ -97,18 +103,16 @@ with col_list:
 with col_profile:
     st.markdown("### Customer Profile")
     
-    # Fetch unified client data
     crm_data = df_crm[df_crm['Client_ID'] == selected_client_id].iloc[0]
     ml_data = df_ml[df_ml['Client_ID'] == selected_client_id].drop(columns=['y', 'duration', 'Client_ID'])
     
-    # Run Inference!
+    # Run Inference
     ml_processed = preprocessor.transform(ml_data)
     cluster_id = kmeans.predict(ml_processed)[0]
     propensity = xgb_model.predict_proba(ml_processed)[0][1]
     
     segment, trajectory, action, human_veto, color = get_insights(cluster_id, propensity)
     
-    # --- Profile Card UI (Matching the mockup) ---
     with st.container(border=True):
         st.markdown(f"## 👤 {crm_data['Name']}")
         
@@ -118,7 +122,6 @@ with col_profile:
         
         st.divider()
         
-        # --- AI Insights Block ---
         st.markdown("#### 🧠 AI Engine Insights")
         st.info(f"**Current Segment:** {segment}")
         
