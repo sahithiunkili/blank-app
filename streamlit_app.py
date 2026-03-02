@@ -1,24 +1,46 @@
 import streamlit as st
 import pandas as pd
-import xgboost as xgb
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.cluster import KMeans
+import joblib
 
 # -----------------------------------------
-# 1. PAGE CONFIGURATION & STATE MANAGEMENT
+# 1. PAGE CONFIGURATION & CUSTOM CSS
 # -----------------------------------------
 st.set_page_config(page_title="Wealth AI - CRM Portal", layout="wide", initial_sidebar_state="collapsed")
 
-# Injecting CSS for the clean CRM look
+# Injecting CSS for the Top Nav and CRM styling
 st.markdown("""
     <style>
-    .stApp { background-color: #f4f6f9; }
-    .css-1d391kg { padding-top: 1rem; }
-    .crm-header { background-color: #1e3a5f; color: white; padding: 15px; border-radius: 5px; text-align: center; margin-bottom: 20px;}
-    .login-container { margin-top: 50px; }
+    .stApp { background-color: #f8f9fc; }
+    
+    /* Custom Top Navigation Bar */
+    .top-nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 15px 30px;
+        background-color: #ffffff;
+        border-bottom: 1px solid #e5e7eb;
+        margin-bottom: 30px;
+        margin-top: -60px; /* Pulls it up to the very top of the Streamlit canvas */
+    }
+    .nav-icons { font-size: 22px; color: #4b5563; cursor: pointer; position: relative;}
+    .nav-center {
+        background-color: #e5e7eb;
+        padding: 6px 20px;
+        border-radius: 20px;
+        font-weight: 600;
+        color: #1f2937;
+        font-size: 15px;
+    }
+    .nav-right { display: flex; gap: 20px; }
+    .dot {
+        height: 8px; width: 8px; background-color: #ef4444;
+        border-radius: 50%; display: inline-block;
+        position: absolute; top: 0px; right: 0px;
+    }
+    
+    /* CRM Header */
+    .crm-header { background-color: #1e3a8a; color: white; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 20px;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -29,33 +51,26 @@ if 'persona' not in st.session_state:
     st.session_state['persona'] = None
 
 # -----------------------------------------
-# 2. BULLETPROOF CACHED ML ARCHITECTURE
+# 2. LOAD DECOUPLED ML ARCHITECTURE
 # -----------------------------------------
 @st.cache_resource
-def initialize_ai_engine():
-    """Loads data and trains models in-memory to prevent version mismatches on the cloud."""
+def load_architecture():
+    """Loads the pre-trained .joblib models from the repository."""
+    try:
+        preprocessor = joblib.load('preprocessor.joblib')
+        kmeans = joblib.load('engine_a_kmeans.joblib')
+        xgb_model = joblib.load('engine_b_xgboost.joblib')
+        return preprocessor, kmeans, xgb_model, True
+    except Exception as e:
+        return None, None, None, str(e)
+
+@st.cache_data
+def load_data():
+    """Loads and aligns the datasets."""
     df_ml = pd.read_csv('bank-additional-full.csv', sep=';')
     df_ml['Client_ID'] = [f"CLI-{10000 + i}" for i in range(len(df_ml))]
     df_crm = pd.read_csv('wealthsimple_crm_mock.csv')
-    
-    X = df_ml.drop(columns=['y', 'duration', 'Client_ID'])
-    y = df_ml['y'].map({'yes': 1, 'no': 0})
-    
-    num_cols = ['age', 'campaign', 'pdays', 'previous', 'emp.var.rate', 'cons.price.idx', 'cons.conf.idx', 'euribor3m', 'nr.employed']
-    cat_cols = ['job', 'marital', 'education', 'default', 'housing', 'loan', 'contact', 'month', 'day_of_week', 'poutcome']
-    
-    preprocessor = ColumnTransformer(transformers=[
-        ('num', Pipeline([('imputer', SimpleImputer(strategy='median')), ('scaler', StandardScaler())]), num_cols),
-        ('cat', Pipeline([('imputer', SimpleImputer(strategy='constant', fill_value='unknown')), ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))]), cat_cols)
-    ])
-    
-    X_processed = preprocessor.fit_transform(X)
-    
-    kmeans = KMeans(n_clusters=5, random_state=42, n_init='auto').fit(X_processed)
-    ratio = y.value_counts()[0] / y.value_counts()[1]
-    xgb_model = xgb.XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=5, scale_pos_weight=ratio, random_state=42).fit(X_processed, y)
-    
-    return df_ml, df_crm, preprocessor, kmeans, xgb_model
+    return df_ml, df_crm
 
 # -----------------------------------------
 # 3. BUSINESS LOGIC
@@ -80,61 +95,69 @@ def get_insights(cluster_id, propensity):
         return segment, "High risk of fatigue or churn if pushed.", "Maintain dormant state. No action recommended.", False, "red"
 
 # -----------------------------------------
-# 4. LOGIN SCREEN UI
+# 4. LOGIN SCREEN
 # -----------------------------------------
 if not st.session_state['logged_in']:
     st.markdown('<div class="crm-header"><h2>🔒 Wealth AI - Secure System Login</h2></div>', unsafe_allow_html=True)
-    
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         with st.container(border=True):
-            st.markdown("### Access CRM Portal")
             with st.form("login_form"):
                 st.text_input("Username", value="admin")
                 st.text_input("Password", type="password", value="••••••••")
                 persona_choice = st.selectbox("Select Role", ["Marketing Operator", "Relationship Manager"])
-                
-                submit = st.form_submit_button("Authenticate")
-                if submit:
+                if st.form_submit_button("Authenticate", use_container_width=True):
                     st.session_state['logged_in'] = True
                     st.session_state['persona'] = persona_choice
                     st.rerun()
 
 # -----------------------------------------
-# 5. CRM PORTAL UI (MAIN DASHBOARD)
+# 5. CRM PORTAL UI
 # -----------------------------------------
 else:
-    # Load models inside a spinner so the user knows it's working
-    with st.spinner("Initializing AI Engines..."):
-        try:
-            df_ml, df_crm, preprocessor, kmeans, xgb_model = initialize_ai_engine()
-        except Exception as e:
-            st.error(f"Failed to initialize AI Engine. Ensure both CSV files are uploaded. Error: {e}")
-            st.stop()
+    # 1. Render the Custom Top Nav Bar
+    st.markdown("""
+        <div class="top-nav">
+            <div class="nav-icons">🔔<span class="dot"></span></div>
+            <div class="nav-center">Home</div>
+            <div class="nav-right">
+                <span class="nav-icons">🎁</span>
+                <span class="nav-icons">👤</span>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
 
-    # Sidebar Logout
-    st.sidebar.title("System Controls")
-    st.sidebar.info(f"**Active Session:**\n{st.session_state['persona']}")
-    if st.sidebar.button("Secure Logout"):
+    # 2. Load Backend
+    preprocessor, kmeans, xgb_model, models_loaded = load_architecture()
+    if getattr(models_loaded, 'startswith', lambda x: False)('Error'):
+        st.error(f"Model Load Error. Ensure Scikit-Learn versions match. Details: {models_loaded}")
+        st.stop()
+        
+    df_ml, df_crm = load_data()
+
+    # Sidebar controls
+    st.sidebar.title("Controls")
+    st.sidebar.info(f"**Session:** {st.session_state['persona']}")
+    if st.sidebar.button("Logout"):
         st.session_state['logged_in'] = False
-        st.session_state['persona'] = None
         st.rerun()
 
-    # Main Header
-    st.markdown('<div class="crm-header"><h2>💼 Wealth AI CRM Portal</h2></div>', unsafe_allow_html=True)
+    st.markdown('<div class="crm-header"><h2>💼 CRM Portal - Welcome, Admin</h2></div>', unsafe_allow_html=True)
 
-    col_list, col_space, col_profile = st.columns([1.5, 0.1, 1.2])
+    # 3. Split Layout
+    col_list, col_space, col_profile = st.columns([1.2, 0.1, 1.5])
 
     with col_list:
         st.markdown("### Customer List")
         
-        display_df = df_crm[['Client_ID', 'Name', 'Profession', 'Estimated_Income_CAD', 'Account_History']].copy()
-        display_df.columns = ['ID', 'Client Name', 'Occupation', 'Est. Income', 'Current Accounts']
+        display_df = df_crm[['Client_ID', 'Name', 'Profession']].copy()
         
-        selected_name = st.selectbox("Search Client Profiles:", df_crm['Name'].tolist())
+        # Select client to populate the right pane
+        selected_name = st.selectbox("Quick Search:", df_crm['Name'].tolist())
         selected_client_id = df_crm[df_crm['Name'] == selected_name]['Client_ID'].values[0]
         
-        st.dataframe(display_df, hide_index=True, height=500)
+        # Show interactive dataframe
+        st.dataframe(display_df, use_container_width=True, hide_index=True, height=550)
 
     with col_profile:
         st.markdown("### Customer Profile")
@@ -142,22 +165,23 @@ else:
         crm_data = df_crm[df_crm['Client_ID'] == selected_client_id].iloc[0]
         ml_data = df_ml[df_ml['Client_ID'] == selected_client_id].drop(columns=['y', 'duration', 'Client_ID'])
         
-        # Run Inference
+        # Run Real-Time Inference
         ml_processed = preprocessor.transform(ml_data)
         cluster_id = kmeans.predict(ml_processed)[0]
         propensity = xgb_model.predict_proba(ml_processed)[0][1]
-        
         segment, trajectory, action, human_veto, color = get_insights(cluster_id, propensity)
         
+        # Profile Card Design
         with st.container(border=True):
-            st.markdown(f"## 👤 {crm_data['Name']}")
-            
+            # Top profile section
+            st.markdown(f"### 👤 {crm_data['Name']}")
             c1, c2 = st.columns(2)
             c1.markdown(f"**Age:** {crm_data['Age']}<br>**Occupation:** {crm_data['Profession']}<br>**Income:** ${crm_data['Estimated_Income_CAD']:,}", unsafe_allow_html=True)
-            c2.markdown(f"**Accounts:** {crm_data['Account_History']}<br>**Newcomer:** {crm_data['Is_Newcomer']}", unsafe_allow_html=True)
+            c2.markdown(f"**Status:** Active 🟢<br>**Accounts:** {crm_data['Account_History']}<br>**Newcomer:** {crm_data['Is_Newcomer']}", unsafe_allow_html=True)
             
             st.divider()
             
+            # AI Insights Section
             st.markdown("#### 🧠 AI Engine Insights")
             st.info(f"**Current Segment:** {segment}")
             
@@ -168,17 +192,16 @@ else:
             else:
                 st.error(f"**Propensity Score:** {propensity * 100:.1f}%\n\n**Action:** {action}")
                 
-            # Dynamic Role-Based Access Control
+            # Governance / RBAC Buttons
             if human_veto:
                 st.error("🚨 **COMPLIANCE HOLD: Human Veto Required**")
-                
                 if st.session_state['persona'] == "Marketing Operator":
-                    st.button("Route to Relationship Manager", type="primary")
-                    st.caption("Access Denied: You do not have compliance clearance to override this hold.")
+                    st.button("Route to RM for Approval", type="primary", use_container_width=True)
+                    st.caption("Access Denied: Marketers cannot override compliance holds.")
                 else:
                     ca, cb = st.columns(2)
-                    ca.button("Approve Exception", type="primary")
-                    cb.button("Dismiss Nudge")
+                    ca.button("Approve Exception", type="primary", use_container_width=True)
+                    cb.button("Dismiss Nudge", use_container_width=True)
             else:
                 st.success("✅ **Cleared for Automated Campaign**")
-                st.button("Execute Action", type="primary")
+                st.button("Execute Action", type="primary", use_container_width=True)
