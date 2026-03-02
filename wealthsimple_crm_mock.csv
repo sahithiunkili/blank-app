@@ -1,0 +1,51 @@
+Client_ID,Name,Age,Profession,Estimated_Income_CAD,Account_History,Is_Newcomer,High_Target_Flag
+CLI-10000,Liam MacDonald,34,Teacher,75000,TFSA Only,No,No
+CLI-10012,Emma Tremblay,28,Retail Manager,55000,TFSA + Crypto,No,No
+CLI-10045,Noah Smith,45,Plumber,85000,RRSP,No,No
+CLI-10089,Olivia Roy,31,Graphic Designer,62000,TFSA,No,No
+CLI-10120,William Chen,24,Student,30000,Non-Registered,Yes,No
+CLI-10250,Sophia Wong,38,Nurse,90000,TFSA + RRSP,No,No
+CLI-10333,Benjamin Martin,52,Electrician,95000,RRSP,No,No
+CLI-10400,Isabella Gagne,29,HR Coordinator,68000,TFSA,No,No
+CLI-10555,Jacob Singh,35,Mechanic,72000,TFSA + RRSP,No,No
+CLI-10789,Mia Ouellet,26,Barista,35000,TFSA,No,No
+CLI-15000,Ethan Patel,41,Software Engineer,145000,RRSP + TFSA + RESP,No,Yes
+CLI-15222,Chloe Kim,39,Marketing Director,130000,RRSP + Managed Portfolio,No,Yes
+CLI-15450,Alexander Lee,48,Architect,160000,RRSP + TFSA,No,Yes
+CLI-16000,Avery Nguyen,36,Product Manager,125000,TFSA + Crypto,No,Yes
+CLI-16543,Jackson Brown,55,VP Operations,210000,RRSP + Spousal RRSP,No,Yes
+CLI-17000,Evelyn Garcia,42,Lawyer,185000,RRSP + TFSA + RESP,No,Yes
+CLI-17500,Logan Martinez,37,Data Scientist,140000,TFSA + Managed Portfolio,No,Yes
+CLI-18000,Abigail Robinson,44,Dentist,250000,RRSP + Non-Registered,No,Yes
+CLI-18500,Lucas Clark,50,Finance Director,195000,RRSP + RESP,No,Yes
+CLI-19000,Harper Lewis,33,Management Consultant,150000,TFSA + RRSP,No,Yes
+CLI-22000,Amir Reza,29,Software Developer,110000,TFSA,Yes,Yes
+CLI-22500,Priya Sharma,31,UX Designer,95000,TFSA + RRSP,Yes,Yes
+CLI-23000,Mateo Silva,27,Civil Engineer,85000,Non-Registered,Yes,No
+CLI-23500,Fatima Ali,34,Pharmacist,120000,RRSP + TFSA,Yes,Yes
+CLI-24000,Anya Ivanova,30,Financial Analyst,105000,TFSA,Yes,Yes
+CLI-25000,Wei Zhang,40,IT Consultant,135000,RRSP + RESP,Yes,Yes
+CLI-26000,Carlos Gomez,28,Logistics Manager,75000,TFSA,Yes,No
+CLI-27000,Yuki Takahashi,32,Research Scientist,115000,TFSA + RRSP,Yes,Yes
+CLI-28000,Oluwaseun Adeyemi,35,Systems Admin,90000,RRSP,Yes,No
+CLI-29000,Sara Al-Fayed,26,Marketing Specialist,65000,TFSA,Yes,No
+CLI-31000,Ryan Murphy,46,Sales Rep,80000,Dormant TFSA,No,No
+CLI-31500,Charlotte White,53,Admin Assistant,55000,Dormant RRSP,No,No
+CLI-32000,Nathan Harris,39,Freelancer,60000,Non-Registered,No,No
+CLI-32500,Amelia Thompson,61,Retail Clerk,45000,Dormant TFSA,No,No
+CLI-33000,Christian King,43,Driver,58000,None,No,No
+CLI-34000,Lily Wright,37,Customer Support,52000,Dormant TFSA,No,No
+CLI-35000,Gabriel Scott,49,Construction,75000,Dormant RRSP,No,No
+CLI-36000,Zoe Green,25,Server,32000,None,No,No
+CLI-37000,Anthony Baker,58,Factory Worker,62000,Dormant RRSP,No,No
+CLI-38000,Grace Adams,41,Call Center Agent,48000,Dormant TFSA,No,No
+CLI-39000,Daniel Nelson,35,Physician,280000,RRSP + TFSA + RESP,No,Yes
+CLI-39500,Victoria Carter,40,Tech Executive,310000,RRSP + Managed + Crypto,No,Yes
+CLI-40000,Matthew Mitchell,32,Investment Banker,220000,TFSA + Non-Registered,No,Yes
+CLI-40500,Penelope Perez,38,Surgeon,350000,RRSP + Spousal RRSP + RESP,No,Yes
+CLI-40800,David Roberts,45,Entrepreneur,400000,HoldCo Invest + RRSP,No,Yes
+CLI-41000,Stella Turner,34,Corporate Counsel,190000,TFSA + RRSP,No,Yes
+CLI-41100,Joseph Phillips,39,Actuary,165000,RRSP + TFSA + RESP,No,Yes
+CLI-41150,Aurora Campbell,31,Senior Data Engineer,155000,TFSA + Crypto,No,Yes
+CLI-41180,Samuel Parker,43,Venture Capitalist,500000,Managed Portfolio + RRSP,No,Yes
+CLI-41187,Eleanor Evans,36,Orthodontist,275000,RRSP + TFSA + RESP,No,Yes
